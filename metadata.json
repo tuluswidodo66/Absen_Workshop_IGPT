@@ -1,0 +1,6 @@
+{
+  "name": "Sistem Absensi Workshop IGPT Tuban",
+  "description": "Sistem Absensi dengan Kamera Wajah terintegrasi dengan Google Sheets",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
