@@ -23,6 +23,7 @@ import {
   ArrowRight
 } from "lucide-react";
 import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import html2canvas from "html2canvas";
 
 interface AttendanceLog {
@@ -93,28 +94,27 @@ function createAvatarBase64(name: string, color: string): string {
   return canvas.toDataURL("image/jpeg", 0.9);
 }
 
-// Helper: Convert any image URL safely to Data URL to avoid CORS taint in canvas
+// Helper: Convert any image URL safely to Data URL with 800ms timeout to prevent hanging
 async function getSafeDataUrl(url: string, name: string): Promise<string> {
   if (!url) return createAvatarBase64(name, "#4f46e5");
   if (url.startsWith("data:image/")) return url;
 
-  return new Promise((resolve) => {
+  const loadPromise = new Promise<string>((resolve) => {
     const img = new Image();
     img.crossOrigin = "Anonymous";
     img.onload = () => {
       try {
         const canvas = document.createElement("canvas");
-        canvas.width = img.naturalWidth || img.width || 120;
-        canvas.height = img.naturalHeight || img.height || 120;
+        canvas.width = Math.min(img.naturalWidth || 120, 200);
+        canvas.height = Math.min(img.naturalHeight || 120, 200);
         const ctx = canvas.getContext("2d");
         if (ctx) {
-          ctx.drawImage(img, 0, 0);
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
-          resolve(dataUrl);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL("image/jpeg", 0.8));
           return;
         }
       } catch (e) {
-        // Tainted canvas due to CORS
+        // Tainted canvas
       }
       resolve(createAvatarBase64(name, "#4f46e5"));
     };
@@ -123,6 +123,14 @@ async function getSafeDataUrl(url: string, name: string): Promise<string> {
     };
     img.src = url;
   });
+
+  const timeoutPromise = new Promise<string>((resolve) => {
+    setTimeout(() => {
+      resolve(createAvatarBase64(name, "#4f46e5"));
+    }, 800);
+  });
+
+  return Promise.race([loadPromise, timeoutPromise]);
 }
 
 export default function App() {
@@ -600,94 +608,164 @@ export default function App() {
       return;
     }
 
-    showToast("Menyiapkan ekspor PDF Landscape...", "info");
-
-    const wrapper = document.getElementById("pdf-container-wrapper");
-    const element = document.getElementById("pdf-landscape-element");
-    if (!wrapper || !element) {
-      showToast("Gagal merender elemen tabel PDF.", "error");
-      return;
-    }
+    showToast("Mengekspor PDF Rekapitulasi Presensi...", "info");
 
     try {
-      // Unhide wrapper safely for rendering
-      wrapper.style.position = "fixed";
-      wrapper.style.left = "0";
-      wrapper.style.top = "0";
-      wrapper.style.zIndex = "99999";
-      wrapper.style.visibility = "visible";
-      wrapper.style.opacity = "1";
+      // 1. Process all photo images concurrently (max 800ms total)
+      const photoDataUrls = await Promise.all(
+        logs.map((log) => getSafeDataUrl(log.foto, log.nama))
+      );
 
-      // Pre-process image URLs to guarantee safe Data URLs and prevent CORS taint
-      const imgElements = element.querySelectorAll<HTMLImageElement>("img[data-pdf-photo]");
-      for (let i = 0; i < imgElements.length; i++) {
-        const img = imgElements[i];
-        const rawSrc = img.getAttribute("data-src") || img.src;
-        const participantName = img.getAttribute("data-name") || "Peserta";
-        if (rawSrc) {
-          const safeUrl = await getSafeDataUrl(rawSrc, participantName);
-          img.src = safeUrl;
-        }
-      }
-
-      // Small pause to allow browser repaint
-      await new Promise((r) => setTimeout(r, 200));
-
-      const canvas = await html2canvas(element, {
-        scale: 2,
-        useCORS: true,
-        allowTaint: true,
-        logging: false,
-        backgroundColor: "#ffffff",
-        windowWidth: 1123
-      });
-
-      // Restore wrapper back to hidden offscreen
-      wrapper.style.position = "fixed";
-      wrapper.style.left = "-9999px";
-      wrapper.style.top = "0";
-      wrapper.style.zIndex = "-100";
-      wrapper.style.visibility = "hidden";
-
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      
-      const pdf = new jsPDF({
+      // 2. Initialize jsPDF in Landscape A4
+      const doc = new jsPDF({
         orientation: "landscape",
-        unit: "pt",
+        unit: "mm",
         format: "a4"
       });
 
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = pdf.internal.pageSize.getHeight();
+      const totalPeserta = logs.length;
+      const tglCetak = new Date().toLocaleDateString("id-ID", {
+        day: "numeric",
+        month: "long",
+        year: "numeric"
+      });
 
-      const imgWidth = pdfWidth;
-      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+      // Header Decorative Bar
+      doc.setFillColor(79, 70, 229); // Indigo 600
+      doc.rect(14, 12, 269, 3, "F");
 
-      let heightLeft = imgHeight;
-      let position = 0;
+      // Document Title
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.setTextColor(30, 41, 59);
+      doc.text("REKAPITULASI DAFTAR HADIR WORKSHOP MENULIS CERITA RAKYAT KABUPATEN TUBAN", 14, 22);
 
-      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pdfHeight;
+      // Subtitle
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.setTextColor(100, 116, 139);
+      doc.text("Pemerintah Kabupaten Tuban - Sistem Presensi Digital Face Recognition", 14, 28);
 
-      while (heightLeft > 5) {
-        position -= pdfHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pdfHeight;
-      }
+      // Metadata Info Box (Right Side)
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor(79, 70, 229);
+      doc.text(`Total Hadir: ${totalPeserta} Peserta`, 283, 22, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Tanggal Cetak: ${tglCetak}`, 283, 28, { align: "right" });
 
-      pdf.save(`Rekap_Absensi_Workshop_Tuban_${Date.now()}.pdf`);
-      
+      // 3. Prepare Table Rows
+      const tableRows = logs.map((log, idx) => [
+        idx + 1,
+        "", // Photo rendered dynamically in didDrawCell
+        log.nama || "-",
+        log.instansi || "-",
+        log.waktu || "-"
+      ]);
+
+      // 4. Render Table with autoTable
+      autoTable(doc, {
+        startY: 34,
+        head: [["NO", "FOTO", "NAMA LENGKAP PESERTA", "INSTANSI / LEMBAGA", "WAKTU PRESENSI"]],
+        body: tableRows,
+        theme: "grid",
+        styles: {
+          minCellHeight: 16
+        },
+        headStyles: {
+          fillColor: [79, 70, 229],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+          halign: "center",
+          valign: "middle",
+          fontSize: 9,
+          cellPadding: 2.5
+        },
+        bodyStyles: {
+          textColor: [30, 41, 59],
+          fontSize: 9,
+          valign: "middle",
+          cellPadding: 2
+        },
+        columnStyles: {
+          0: { halign: "center", cellWidth: 12 },
+          1: { halign: "center", cellWidth: 24 },
+          2: { halign: "left", cellWidth: 85, fontStyle: "bold" },
+          3: { halign: "left", cellWidth: 88 },
+          4: { halign: "center", cellWidth: 60 }
+        },
+        margin: { left: 14, right: 14, bottom: 18 },
+        didDrawCell: (data) => {
+          if (data.section === "body" && data.column.index === 1) {
+            const rowIndex = data.row.index;
+            const log = logs[rowIndex];
+            if (!log) return;
+
+            const cell = data.cell;
+            const posX = cell.x + 3;
+            const posY = cell.y + 1.5;
+            const imgW = 18;
+            const imgH = 13;
+
+            const photoSrc = photoDataUrls[rowIndex];
+            if (photoSrc && photoSrc.startsWith("data:image/")) {
+              try {
+                doc.addImage(photoSrc, "JPEG", posX, posY, imgW, imgH);
+                return;
+              } catch (e) {
+                // Fallback to vector initials badge
+              }
+            }
+
+            // Vector Initials Badge
+            const initials = (log.nama || "P")
+              .split(" ")
+              .map((n) => n[0])
+              .join("")
+              .substring(0, 2)
+              .toUpperCase();
+
+            doc.setFillColor(79, 70, 229);
+            doc.roundedRect(posX, posY, imgW, imgH, 1.5, 1.5, "F");
+
+            doc.setTextColor(255, 255, 255);
+            doc.setFontSize(8);
+            doc.setFont("helvetica", "bold");
+            doc.text(initials, posX + imgW / 2, posY + imgH / 2 + 0.5, {
+              align: "center",
+              baseline: "middle"
+            });
+          }
+        },
+        didDrawPage: (data) => {
+          const totalPages = (doc as any).internal.getNumberOfPages();
+          const pageCurrent = data.pageNumber;
+
+          doc.setFontSize(8);
+          doc.setTextColor(148, 163, 184);
+          doc.setFont("helvetica", "normal");
+          doc.text(
+            `Sistem Presensi Digital Workshop Tuban - Halaman ${pageCurrent} dari ${totalPages}`,
+            14,
+            202
+          );
+          doc.text(
+            `Dicetak: ${new Date().toLocaleString("id-ID")}`,
+            283,
+            202,
+            { align: "right" }
+          );
+        }
+      });
+
+      // 5. Direct Save File
+      const fileName = `Rekap_Absensi_Workshop_Tuban_${Date.now()}.pdf`;
+      doc.save(fileName);
+
       showToast("Berkas PDF rekapitulasi berhasil diunduh!", "success");
     } catch (err: any) {
       console.error("Gagal mengekspor PDF:", err);
-      if (wrapper) {
-        wrapper.style.position = "fixed";
-        wrapper.style.left = "-9999px";
-        wrapper.style.top = "0";
-        wrapper.style.zIndex = "-100";
-        wrapper.style.visibility = "hidden";
-      }
       showToast(`Gagal mengekspor PDF: ${err?.message || err}`, "error");
     }
   };
