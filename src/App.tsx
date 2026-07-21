@@ -33,6 +33,98 @@ interface AttendanceLog {
   foto: string;
 }
 
+// Helper: Adjust hex color brightness
+function adjustColorBrightness(hex: string, percent: number): string {
+  if (!hex || hex[0] !== '#') return "#4f46e5";
+  let R = parseInt(hex.substring(1, 3), 16) || 0;
+  let G = parseInt(hex.substring(3, 5), 16) || 0;
+  let B = parseInt(hex.substring(5, 7), 16) || 0;
+
+  R = parseInt(((R * (100 + percent)) / 100).toString());
+  G = parseInt(((G * (100 + percent)) / 100).toString());
+  B = parseInt(((B * (100 + percent)) / 100).toString());
+
+  R = R < 255 ? R : 255;
+  G = G < 255 ? G : 255;
+  B = B < 255 ? B : 255;
+
+  const rHex = R.toString(16).padStart(2, "0");
+  const gHex = G.toString(16).padStart(2, "0");
+  const bHex = B.toString(16).padStart(2, "0");
+
+  return `#${rHex}${gHex}${bHex}`;
+}
+
+// Helper: Create initials avatar base64
+function createAvatarBase64(name: string, color: string): string {
+  const canvas = document.createElement("canvas");
+  canvas.width = 200;
+  canvas.height = 200;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return "";
+
+  // Gradient background
+  const grad = ctx.createLinearGradient(0, 0, 200, 200);
+  grad.addColorStop(0, color || "#4f46e5");
+  grad.addColorStop(1, adjustColorBrightness(color || "#4f46e5", -20));
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, 200, 200);
+
+  // Decorative geometric accent
+  ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
+  ctx.beginPath();
+  ctx.arc(100, 100, 70, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Text
+  ctx.fillStyle = "#ffffff";
+  ctx.font = "bold 80px sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  
+  const initials = (name || "Peserta")
+    .split(" ")
+    .map(n => n[0])
+    .join("")
+    .substring(0, 2)
+    .toUpperCase() || "P";
+    
+  ctx.fillText(initials, 100, 100);
+  return canvas.toDataURL("image/jpeg", 0.9);
+}
+
+// Helper: Convert any image URL safely to Data URL to avoid CORS taint in canvas
+async function getSafeDataUrl(url: string, name: string): Promise<string> {
+  if (!url) return createAvatarBase64(name, "#4f46e5");
+  if (url.startsWith("data:image/")) return url;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = "Anonymous";
+    img.onload = () => {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = img.naturalWidth || img.width || 120;
+        canvas.height = img.naturalHeight || img.height || 120;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+          resolve(dataUrl);
+          return;
+        }
+      } catch (e) {
+        // Tainted canvas due to CORS
+      }
+      resolve(createAvatarBase64(name, "#4f46e5"));
+    };
+    img.onerror = () => {
+      resolve(createAvatarBase64(name, "#4f46e5"));
+    };
+    img.src = url;
+  });
+}
+
 export default function App() {
   // Core States
   const [step, setStep] = useState<number>(1);
@@ -216,64 +308,7 @@ export default function App() {
     setToast({ message, type });
   };
 
-  // Helper: Create initials avatar base64
-  function createAvatarBase64(name: string, color: string): string {
-    const canvas = document.createElement("canvas");
-    canvas.width = 200;
-    canvas.height = 200;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return "";
 
-    // Gradient background
-    const grad = ctx.createLinearGradient(0, 0, 200, 200);
-    grad.addColorStop(0, color);
-    grad.addColorStop(1, adjustColorBrightness(color, -20));
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 200, 200);
-
-    // Decorative geometric accent
-    ctx.fillStyle = "rgba(255, 255, 255, 0.1)";
-    ctx.beginPath();
-    ctx.arc(100, 100, 70, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Text
-    ctx.fillStyle = "#ffffff";
-    ctx.font = "bold 80px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    
-    const initials = name
-      .split(" ")
-      .map(n => n[0])
-      .join("")
-      .substring(0, 2)
-      .toUpperCase() || "P";
-      
-    ctx.fillText(initials, 100, 100);
-    return canvas.toDataURL("image/jpeg", 0.9);
-  }
-
-  // Adjust hex color brightness
-  function adjustColorBrightness(hex: string, percent: number): string {
-    let R = parseInt(hex.substring(1, 3), 16);
-    let G = parseInt(hex.substring(3, 5), 16);
-    let B = parseInt(hex.substring(5, 7), 16);
-
-    R = parseInt(((R * (100 + percent)) / 100).toString());
-    G = parseInt(((G * (100 + percent)) / 100).toString());
-    B = parseInt(((B * (100 + percent)) / 100).toString());
-
-    R = R < 255 ? R : 255;
-    G = G < 255 ? G : 255;
-    B = B < 255 ? B : 255;
-
-    const rHex = R.toString(16).padStart(2, "0");
-    const gHex = G.toString(16).padStart(2, "0");
-    const bHex = B.toString(16).padStart(2, "0");
-
-    return `#${rHex}${gHex}${bHex}`;
-  }
 
   // Start Physical Camera or Fallback to Simulation
   const startCamera = async () => {
@@ -567,27 +602,52 @@ export default function App() {
 
     showToast("Menyiapkan ekspor PDF Landscape...", "info");
 
+    const wrapper = document.getElementById("pdf-container-wrapper");
     const element = document.getElementById("pdf-landscape-element");
-    if (!element) {
+    if (!wrapper || !element) {
       showToast("Gagal merender elemen tabel PDF.", "error");
       return;
     }
 
     try {
-      element.style.position = "static";
-      element.style.left = "0";
-      element.style.visibility = "visible";
+      // Unhide wrapper safely for rendering
+      wrapper.style.position = "fixed";
+      wrapper.style.left = "0";
+      wrapper.style.top = "0";
+      wrapper.style.zIndex = "99999";
+      wrapper.style.visibility = "visible";
+      wrapper.style.opacity = "1";
+
+      // Pre-process image URLs to guarantee safe Data URLs and prevent CORS taint
+      const imgElements = element.querySelectorAll<HTMLImageElement>("img[data-pdf-photo]");
+      for (let i = 0; i < imgElements.length; i++) {
+        const img = imgElements[i];
+        const rawSrc = img.getAttribute("data-src") || img.src;
+        const participantName = img.getAttribute("data-name") || "Peserta";
+        if (rawSrc) {
+          const safeUrl = await getSafeDataUrl(rawSrc, participantName);
+          img.src = safeUrl;
+        }
+      }
+
+      // Small pause to allow browser repaint
+      await new Promise((r) => setTimeout(r, 200));
 
       const canvas = await html2canvas(element, {
         scale: 2,
         useCORS: true,
+        allowTaint: true,
         logging: false,
-        backgroundColor: "#ffffff"
+        backgroundColor: "#ffffff",
+        windowWidth: 1123
       });
 
-      element.style.position = "absolute";
-      element.style.left = "-9999px";
-      element.style.visibility = "hidden";
+      // Restore wrapper back to hidden offscreen
+      wrapper.style.position = "fixed";
+      wrapper.style.left = "-9999px";
+      wrapper.style.top = "0";
+      wrapper.style.zIndex = "-100";
+      wrapper.style.visibility = "hidden";
 
       const imgData = canvas.toDataURL("image/jpeg", 0.95);
       
@@ -600,13 +660,35 @@ export default function App() {
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = pdf.internal.pageSize.getHeight();
 
-      pdf.addImage(imgData, "JPEG", 0, 0, pdfWidth, pdfHeight);
+      const imgWidth = pdfWidth;
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
+      heightLeft -= pdfHeight;
+
+      while (heightLeft > 5) {
+        position -= pdfHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
+        heightLeft -= pdfHeight;
+      }
+
       pdf.save(`Rekap_Absensi_Workshop_Tuban_${Date.now()}.pdf`);
       
       showToast("Berkas PDF rekapitulasi berhasil diunduh!", "success");
-    } catch (err) {
-      console.error(err);
-      showToast("Terjadi kesalahan saat mengekspor PDF.", "error");
+    } catch (err: any) {
+      console.error("Gagal mengekspor PDF:", err);
+      if (wrapper) {
+        wrapper.style.position = "fixed";
+        wrapper.style.left = "-9999px";
+        wrapper.style.top = "0";
+        wrapper.style.zIndex = "-100";
+        wrapper.style.visibility = "hidden";
+      }
+      showToast(`Gagal mengekspor PDF: ${err?.message || err}`, "error");
     }
   };
 
@@ -1162,7 +1244,7 @@ export default function App() {
       </footer>
 
       {/* OFF-SCREEN LANDSCAPE REPORT ELEMENT FOR PRINTING/DOWNLOAD */}
-      <div style={{ position: "absolute", left: "-9999px", top: 0, width: "1123px", background: "white", overflow: "hidden", zIndex: -100, visibility: "hidden" }}>
+      <div id="pdf-container-wrapper" style={{ position: "fixed", left: "-9999px", top: 0, width: "1123px", background: "white", overflow: "hidden", zIndex: -100, visibility: "hidden" }}>
         <div id="pdf-landscape-element" className="p-10 font-sans text-slate-800 bg-white" style={{ width: "1123px", boxSizing: "border-box" }}>
           
           <div className="text-center border-b-4 border-double border-slate-900 pb-5 mb-6">
@@ -1196,7 +1278,15 @@ export default function App() {
                   <td className="py-3 px-2 text-center font-bold text-slate-400">{index + 1}</td>
                   <td className="py-3 px-3 text-center">
                     <div className="inline-block w-14 h-14 rounded-lg overflow-hidden border border-slate-300 bg-slate-50">
-                      <img src={item.foto} className="w-full h-full object-cover" alt="Foto" referrerPolicy="no-referrer" />
+                      <img 
+                        src={item.foto} 
+                        data-src={item.foto}
+                        data-name={item.nama}
+                        data-pdf-photo="true"
+                        className="w-full h-full object-cover" 
+                        alt="Foto" 
+                        referrerPolicy="no-referrer" 
+                      />
                     </div>
                   </td>
                   <td className="py-3 px-4 font-black text-slate-900 text-sm">{item.nama}</td>
