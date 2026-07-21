@@ -39,7 +39,11 @@ export default function App() {
   const [nama, setNama] = useState<string>("");
   const [instansi, setInstansi] = useState<string>("");
   const [appsScriptUrl, setAppsScriptUrl] = useState<string>(() => {
-    return localStorage.getItem("appsScriptUrl") || "https://script.google.com/macros/s/AKfycbzY02TqfGqJGMPWUV5nxNm3ffDch7l_uQxAU86E2s2VynI0OmJJ4toWQcutHKvXDkHjmQ/exec";
+    const saved = localStorage.getItem("appsScriptUrl");
+    if (saved === "https://script.google.com/macros/s/AKfycbzY02TqfGqJGMPWUV5nxNm3ffDch7l_uQxAU86E2s2VynI0OmJJ4toWQcutHKvXDkHjmQ/exec") {
+      return "https://script.google.com/macros/s/AKfycbxC9sqr2eYkZxkYSziaJAhkFBrXjEY97DO980B8lLkTZaOkawRw8hrUzleG52uEME3clw/exec";
+    }
+    return saved || "https://script.google.com/macros/s/AKfycbxC9sqr2eYkZxkYSziaJAhkFBrXjEY97DO980B8lLkTZaOkawRw8hrUzleG52uEME3clw/exec";
   });
   
   // Settings & Navigation
